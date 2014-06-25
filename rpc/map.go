@@ -75,21 +75,17 @@ func (m *serviceMap) register(rcvr interface{}, name string) error {
 		if method.PkgPath != "" {
 			continue
 		}
-		// Method needs four ins: receiver, *http.Request, *args, *reply.
+		// Method needs four ins: receiver, *args, *reply.
 		if mtype.NumIn() != 4 {
 			continue
 		}
-		// First argument must be a pointer and must be http.Request.
-		reqType := mtype.In(1)
-		if reqType.Kind() != reflect.Ptr || reqType.Elem() != typeOfRequest {
-			continue
-		}
-		// Second argument must be a pointer and must be exported.
+
+		// First argument must be a pointer and must be exported.
 		args := mtype.In(2)
 		if args.Kind() != reflect.Ptr || !isExportedOrBuiltin(args) {
 			continue
 		}
-		// Third argument must be a pointer and must be exported.
+		// Second argument must be a pointer and must be exported.
 		reply := mtype.In(3)
 		if reply.Kind() != reflect.Ptr || !isExportedOrBuiltin(reply) {
 			continue

@@ -7,9 +7,11 @@ package json2
 
 import (
 	"encoding/json"
-	"net/http"
+  "io"
 
 	"github.com/bluele/golang-misc/rpc"
+  "github.com/bluele/golang-misc/rpc/ws"
+  "github.com/gorilla/websocket"
 )
 
 var null = json.RawMessage([]byte("null"))
@@ -75,8 +77,8 @@ type Codec struct {
 }
 
 // NewRequest returns a CodecRequest.
-func (c *Codec) NewRequest(r *http.Request) rpc.CodecRequest {
-	return newCodecRequest(r, c.encSel.Select(r))
+func (c *Codec) NewRequest(r io.Reader) rpc.CodecRequest {
+	return newCodecRequest(r)
 }
 
 // ----------------------------------------------------------------------------
@@ -84,10 +86,9 @@ func (c *Codec) NewRequest(r *http.Request) rpc.CodecRequest {
 // ----------------------------------------------------------------------------
 
 // newCodecRequest returns a new CodecRequest.
-func newCodecRequest(r *http.Request, encoder rpc.Encoder) rpc.CodecRequest {
-	// Decode the request body and check if RPC method is valid.
+func newCodecRequest(r io.Reader) rpc.CodecRequest {
 	req := new(serverRequest)
-	err := json.NewDecoder(r.Body).Decode(req)
+	err := json.NewDecoder(r).Decode(req)
 	if err != nil {
 		err = &Error{
 			Code:    E_PARSE,
@@ -102,8 +103,7 @@ func newCodecRequest(r *http.Request, encoder rpc.Encoder) rpc.CodecRequest {
 			Data:    req,
 		}
 	}
-	r.Body.Close()
-	return &CodecRequest{request: req, err: err, encoder: encoder}
+	return &CodecRequest{request: req, err: err, encoder: rpc.DefaultEncoder}
 }
 
 // CodecRequest decodes and encodes a single request.
@@ -147,16 +147,16 @@ func (c *CodecRequest) ReadRequest(args interface{}) error {
 }
 
 // WriteResponse encodes the response and writes it to the ResponseWriter.
-func (c *CodecRequest) WriteResponse(w http.ResponseWriter, reply interface{}) {
+func (c *CodecRequest) WriteResponse(conn ws.Connection, reply interface{}) {
 	res := &serverResponse{
 		Version: Version,
 		Result:  reply,
 		Id:      c.request.Id,
 	}
-	c.writeServerResponse(w, res)
+  c.writeServerResponse(conn, res)
 }
 
-func (c *CodecRequest) WriteError(w http.ResponseWriter, status int, err error) {
+func (c *CodecRequest) WriteError(conn ws.Connection, status int, err error) {
 	jsonErr, ok := err.(*Error)
 	if !ok {
 		jsonErr = &Error{
@@ -169,20 +169,19 @@ func (c *CodecRequest) WriteError(w http.ResponseWriter, status int, err error) 
 		Error:   jsonErr,
 		Id:      c.request.Id,
 	}
-	c.writeServerResponse(w, res)
+	c.writeServerResponse(conn, res)
 }
 
-func (c *CodecRequest) writeServerResponse(w http.ResponseWriter, res *serverResponse) {
+func (c *CodecRequest) writeServerResponse(conn ws.Connection, res *serverResponse) {
 	// Id is null for notifications and they don't have a response.
 	if c.request.Id != nil {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		encoder := json.NewEncoder(c.encoder.Encode(w))
-		err := encoder.Encode(res)
+    dat, err := json.Marshal(res)
 
 		// Not sure in which case will this happen. But seems harmless.
 		if err != nil {
-			rpc.WriteError(w, 400, err.Error())
+      c.WriteError(conn, 400, err)
 		}
+    conn.Write(websocket.TextMessage, dat)
 	}
 }
 

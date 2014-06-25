@@ -6,10 +6,11 @@
 package rpc
 
 import (
-	"fmt"
-	"net/http"
+	"io"
 	"reflect"
 	"strings"
+	"errors"
+  "github.com/bluele/golang-misc/rpc/ws"
 )
 
 // ----------------------------------------------------------------------------
@@ -18,7 +19,7 @@ import (
 
 // Codec creates a CodecRequest to process each request.
 type Codec interface {
-	NewRequest(*http.Request) CodecRequest
+	NewRequest(io.Reader) CodecRequest
 }
 
 // CodecRequest decodes a request and encodes a response using a specific
@@ -29,9 +30,9 @@ type CodecRequest interface {
 	// Reads the request filling the RPC method args.
 	ReadRequest(interface{}) error
 	// Writes the response using the RPC method reply.
-	WriteResponse(http.ResponseWriter, interface{})
+	WriteResponse(ws.Connection, interface{})
 	// Writes an error produced by the server.
-	WriteError(w http.ResponseWriter, status int, err error)
+	WriteError(conn ws.Connection, status int, err error)
 }
 
 // ----------------------------------------------------------------------------
@@ -91,50 +92,32 @@ func (s *Server) HasMethod(method string) bool {
 	return false
 }
 
-func (s *Server) ServeRequest(messageType int, p []byte, err error) {
-
-}
-
-// ServeHTTP
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		WriteError(w, 405, "rpc: POST method required, received "+r.Method)
-		return
-	}
-	contentType := r.Header.Get("Content-Type")
-	idx := strings.Index(contentType, ";")
-	if idx != -1 {
-		contentType = contentType[:idx]
-	}
+func (s *Server) ServeRequest(contentType string, r io.Reader, conn ws.Connection) error {
 	codec := s.codecs[strings.ToLower(contentType)]
 	if codec == nil {
-		WriteError(w, 415, "rpc: unrecognized Content-Type: "+contentType)
-		return
+		return errors.New("rpc: unrecognized Content-Type: "+contentType)
 	}
 	// Create a new codec request.
 	codecReq := codec.NewRequest(r)
 	// Get service method to be called.
 	method, errMethod := codecReq.Method()
 	if errMethod != nil {
-		codecReq.WriteError(w, 400, errMethod)
-		return
+		return errMethod
 	}
 	serviceSpec, methodSpec, errGet := s.services.get(method)
 	if errGet != nil {
-		codecReq.WriteError(w, 400, errGet)
-		return
+		return errGet
 	}
 	// Decode the args.
 	args := reflect.New(methodSpec.argsType)
 	if errRead := codecReq.ReadRequest(args.Interface()); errRead != nil {
-		codecReq.WriteError(w, 400, errRead)
-		return
+		return errRead
 	}
 	// Call the service method.
 	reply := reflect.New(methodSpec.replyType)
 	errValue := methodSpec.method.Func.Call([]reflect.Value{
 		serviceSpec.rcvr,
-		reflect.ValueOf(r),
+    reflect.ValueOf(conn),
 		args,
 		reply,
 	})
@@ -146,17 +129,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Prevents Internet Explorer from MIME-sniffing a response away
 	// from the declared content-type
-	w.Header().Set("x-content-type-options", "nosniff")
+	// w.Header().Set("x-content-type-options", "nosniff")
 	// Encode the response.
 	if errResult == nil {
-		codecReq.WriteResponse(w, reply.Interface())
+		// codecReq.WriteResponse(w, reply.Interface())
 	} else {
-		codecReq.WriteError(w, 400, errResult)
+		return errResult
 	}
+	return nil
 }
 
-func WriteError(w http.ResponseWriter, status int, msg string) {
-	w.WriteHeader(status)
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprint(w, msg)
+func WriteError(conn ws.Connection, status int, msg string) {
+  conn.Write(status, []byte(msg))
 }

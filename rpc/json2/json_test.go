@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/bluele/golang-misc/rpc"
+  "github.com/gorilla/websocket"
 )
 
 // ResponseRecorder is an implementation of http.ResponseWriter that
