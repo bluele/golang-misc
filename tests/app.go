@@ -5,5 +5,5 @@ func Add(x, y int) int {
 }
 
 func Mul(x, y int) int {
-	return 1
+	return x * y
 }
