@@ -129,10 +129,9 @@ func (s *Server) ServeRequest(contentType string, r io.Reader, conn ws.Connectio
 	}
 	// Prevents Internet Explorer from MIME-sniffing a response away
 	// from the declared content-type
-	// w.Header().Set("x-content-type-options", "nosniff")
 	// Encode the response.
 	if errResult == nil {
-		// codecReq.WriteResponse(w, reply.Interface())
+		codecReq.WriteResponse(conn, reply.Interface())
 	} else {
 		return errResult
 	}
